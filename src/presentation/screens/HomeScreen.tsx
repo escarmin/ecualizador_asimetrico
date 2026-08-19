@@ -16,10 +16,11 @@ import { CLINICAL_FREQUENCIES, EarSide, ProfilesMap, createDefaultProfiles } fro
 import { AudiometricTestState, createInitialTestState } from '../../domain/entities/AudiometricTestState';
 import { FeedbackType } from '../../domain/entities/FeedbackLog';
 import { HealthAlert } from '../../domain/entities/HealthAlert';
-import { WebAudioEngineServiceImpl } from '../../infrastructure/audio/WebAudioEngineServiceImpl';
+import { AudioMode, WebAudioEngineServiceImpl } from '../../infrastructure/audio/WebAudioEngineServiceImpl';
 import { MMKVRepositoryImpl } from '../../infrastructure/repositories/MMKVRepositoryImpl';
 import { WebStorageRepositoryImpl } from '../../infrastructure/repositories/WebStorageRepositoryImpl';
 import { AccessibleHeader } from '../components/AccessibleHeader';
+import { AudioModeSelector } from '../components/AudioModeSelector';
 import { CollapsibleSection } from '../components/CollapsibleSection';
 import { AudiometricTestPanel } from '../components/AudiometricTestPanel';
 import { CareMonitorPanel } from '../components/CareMonitorPanel';
@@ -64,6 +65,7 @@ export const HomeScreen: React.FC = () => {
   const [isCareMonitorVisible, setIsCareMonitorVisible] = useState<boolean>(false);
   const [unreadNotificationsCount, setUnreadNotificationsCount] = useState<number>(0);
   const [showDisclaimer, setShowDisclaimer] = useState<boolean>(false);
+  const [audioMode, setAudioMode] = useState<AudioMode>('ambient');
 
   useEffect(() => {
     (async () => {
@@ -84,6 +86,36 @@ export const HomeScreen: React.FC = () => {
       await audioEngine.stopEngine();
       setIsEngineActive(false);
     } else {
+      if (Platform.OS === 'android') {
+        const { PermissionsAndroid } = require('react-native');
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+          {
+            title: "Permiso de Micrófono",
+            message: "La app necesita usar el micrófono para aplicar el ecualizador asimétrico ambiental.",
+            buttonNeutral: "Preguntar Luego",
+            buttonNegative: "Cancelar",
+            buttonPositive: "OK"
+          }
+        );
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+          console.warn("Permiso de micrófono denegado");
+          // Continuar de todos modos, quizá funciona modo sistema
+        }
+      }
+      
+      const currentConfig = profiles[activeSlot] || profiles['1'];
+      audioEngine.setAudioMode(audioMode);
+      const success = await audioEngine.startEngine(currentConfig);
+      setIsEngineActive(success);
+    }
+  };
+
+  const handleAudioModeChange = async (mode: AudioMode) => {
+    setAudioMode(mode);
+    if (isEngineActive) {
+      await audioEngine.stopEngine();
+      audioEngine.setAudioMode(mode);
       const currentConfig = profiles[activeSlot] || profiles['1'];
       const success = await audioEngine.startEngine(currentConfig);
       setIsEngineActive(success);
@@ -343,6 +375,13 @@ export const HomeScreen: React.FC = () => {
           accentColor="#8b5cf6"
           defaultExpanded={true}
         >
+          <AudioModeSelector
+            mode={audioMode}
+            onModeChange={handleAudioModeChange}
+            disabled={false}
+            textColor={theme.text}
+            cardBg={theme.cardBg}
+          />
           <EqualizerSliders
             config={currentEarConfig}
             onChangeBandGain={handleChangeBandGain}
