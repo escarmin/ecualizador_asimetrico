@@ -34,6 +34,9 @@ class NativeAudioEngineModule(reactContext: ReactApplicationContext) : ReactCont
     @Volatile private var ambientRightGains = DoubleArray(11)
     private var ambientRecord: AudioRecord? = null
     private var ambientTrack: AudioTrack? = null
+    private var ambientThread: Thread? = null
+    private var testThread: Thread? = null
+    @Volatile private var configChanged = false
 
     // ─── Filtro Biquad Peaking EQ (DSP) ─────────────────────────────────────────
     inner class BiquadFilter(private val frequency: Double) {
@@ -41,6 +44,10 @@ class NativeAudioEngineModule(reactContext: ReactApplicationContext) : ReactCont
         private var a1 = 0.0; private var a2 = 0.0
         private var x1 = 0.0; private var x2 = 0.0
         private var y1 = 0.0; private var y2 = 0.0
+
+        fun reset() {
+            x1 = 0.0; x2 = 0.0; y1 = 0.0; y2 = 0.0
+        }
 
         fun setGain(gainDb: Double, Q: Double = 1.4) {
             if (abs(gainDb) < 0.1) {
@@ -59,10 +66,15 @@ class NativeAudioEngineModule(reactContext: ReactApplicationContext) : ReactCont
         }
 
         fun process(x: Double): Double {
-            val y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+            var y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+            // Protección matemática contra voladuras de estado (Infinity/NaN)
+            if (y.isNaN() || y.isInfinite()) { y = 0.0; reset() }
+            // Límite interno de estado para evitar feedback destructivo progresivo
+            y = y.coerceIn(-5.0, 5.0)
+
             x2 = x1; x1 = x
             y2 = y1; y1 = y
-            return y.coerceIn(-1.0, 1.0)
+            return y
         }
     }
 
@@ -162,7 +174,7 @@ class NativeAudioEngineModule(reactContext: ReactApplicationContext) : ReactCont
 
         try {
             ambientRecord = AudioRecord(
-                MediaRecorder.AudioSource.MIC, // Volvemos a MIC estándar (sin filtros agresivos de voz)
+                MediaRecorder.AudioSource.MIC, // Volvemos a MIC estándar puro (sin reducción de volumen del OS)
                 SAMPLE_RATE,
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, inBufSize
             )
@@ -174,6 +186,7 @@ class NativeAudioEngineModule(reactContext: ReactApplicationContext) : ReactCont
         }
 
         isAmbientRunning = true
+        configChanged = true // Forzar fade-in al inicio
         promise.resolve(true)
 
         Thread {
@@ -188,6 +201,10 @@ class NativeAudioEngineModule(reactContext: ReactApplicationContext) : ReactCont
                 ambientRecord?.startRecording()
                 ambientTrack?.play()
 
+                // ── Fade-in de arranque y cambios de perfil ──────────────────────────
+                val FADE_BLOCKS = 6  // ~150ms a 44100Hz con bloques de ~1024 samples
+                var blocksElapsed = 0
+
                 while (isAmbientRunning) {
                     val read = ambientRecord?.read(inputBuf, 0, inputBuf.size) ?: break
                     if (read <= 0) continue
@@ -198,12 +215,22 @@ class NativeAudioEngineModule(reactContext: ReactApplicationContext) : ReactCont
                         continue
                     }
 
-                    filtersL.forEachIndexed { i, f -> f.setGain(ambientLeftGains[i], 0.707) }
-                    filtersR.forEachIndexed { i, f -> f.setGain(ambientRightGains[i], 0.707) }
+                    if (configChanged) {
+                        blocksElapsed = 0
+                        configChanged = false
+                    }
+
+                    // Calcular el ratio de fade (0.0 → 1.0 en los primeros FADE_BLOCKS bloques)
+                    val fadeRatio = if (blocksElapsed < FADE_BLOCKS)
+                        blocksElapsed.toDouble() / FADE_BLOCKS else 1.0
+                    if (blocksElapsed < FADE_BLOCKS) blocksElapsed++
+
+                    // Aplicar ganancias interpoladas por el fade
+                    filtersL.forEachIndexed { i, f -> f.setGain(ambientLeftGains[i] * fadeRatio, 0.707) }
+                    filtersR.forEachIndexed { i, f -> f.setGain(ambientRightGains[i] * fadeRatio, 0.707) }
 
                     for (i in 0 until read) {
-                        // Multiplicamos x3.0 para darle un gran boost al micrófono
-                        val sample = (inputBuf[i].toDouble() / Short.MAX_VALUE) * 3.0
+                        val sample = inputBuf[i].toDouble() / Short.MAX_VALUE
 
                         var outL = sample
                         for (f in filtersL) outL = f.process(outL)
@@ -211,10 +238,9 @@ class NativeAudioEngineModule(reactContext: ReactApplicationContext) : ReactCont
                         var outR = sample
                         for (f in filtersR) outR = f.process(outR)
 
-                        outputBuf[i * 2]     = (outL * Short.MAX_VALUE).toInt()
-                            .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
-                        outputBuf[i * 2 + 1] = (outR * Short.MAX_VALUE).toInt()
-                            .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+                        val finalGain = 6.0
+                        outputBuf[i * 2]     = (tanh(outL * finalGain) * Short.MAX_VALUE).toInt().toShort()
+                        outputBuf[i * 2 + 1] = (tanh(outR * finalGain) * Short.MAX_VALUE).toInt().toShort()
                     }
 
                     ambientTrack?.write(outputBuf, 0, read * 2)
@@ -225,7 +251,7 @@ class NativeAudioEngineModule(reactContext: ReactApplicationContext) : ReactCont
                 try { ambientTrack?.stop();  ambientTrack?.release()  } catch (e: Exception) {}
                 ambientRecord = null; ambientTrack = null
             }
-        }.start()
+        }.also { ambientThread = it }.start()
     }
 
     @ReactMethod
@@ -241,18 +267,33 @@ class NativeAudioEngineModule(reactContext: ReactApplicationContext) : ReactCont
             ambientLeftGains[i]  = if (i < leftGains.size())  leftGains.getDouble(i)  else 0.0
             ambientRightGains[i] = if (i < rightGains.size()) rightGains.getDouble(i) else 0.0
         }
+        configChanged = true
         promise.resolve(true)
     }
 
     private fun stopAmbientInternal() {
         isAmbientRunning = false
-        // El hilo se detiene cuando isAmbientRunning == false
-        Thread.sleep(80) // Dar tiempo al loop para detenerse
+        // Esperar que el hilo realmente termine antes de continuar (evita doble-escritura en AudioTrack)
+        try { ambientThread?.join(500) } catch (e: Exception) {}
+        ambientThread = null
     }
 
-    // ─── Tonos de Autoexamen ───────────────────────────────────────────────────
+    @Volatile private var testVol = 0f
+    @Volatile private var testFreq = 0.0
+    @Volatile private var testEar = "both"
+
     @ReactMethod
     fun playTestTone(frequency: Double, ear: String, gainDb: Double, promise: Promise) {
+        testFreq = frequency
+        testEar = ear
+        testVol = Math.pow(10.0, gainDb / 20.0).toFloat().coerceIn(0f, 1f)
+
+        if (isTestingTone && testThread?.isAlive == true) {
+            // Ya está corriendo el hilo de prueba, solo actualizamos las variables
+            promise.resolve(true)
+            return
+        }
+
         stopTestToneInternal()
         requestFocus()
         isTestingTone = true
@@ -270,28 +311,36 @@ class NativeAudioEngineModule(reactContext: ReactApplicationContext) : ReactCont
 
                 promise.resolve(true)
 
-                val vol = Math.pow(10.0, gainDb / 20.0).toFloat().coerceIn(0f, 1f)
                 val chunkPairs = bufSize / 4 // cantidad de frames stereo por chunk
                 val chunk      = ShortArray(chunkPairs * 2)
                 var frame      = 0L
-                val maxFrames  = SAMPLE_RATE.toLong() * 8
+                val maxFrames  = SAMPLE_RATE.toLong() * 60 // Hasta 60 segundos continuos si no se detiene
 
-                while (frame < maxFrames) {
+                while (frame < maxFrames && isTestingTone) {
                     val track = testAudioTrack ?: break
                     if (track.playState != AudioTrack.PLAYSTATE_PLAYING) break
 
+                    val currentFreq = testFreq
+                    val currentEar = testEar
+                    val currentVol = testVol
+
                     for (i in 0 until chunkPairs) {
-                        val sample = (sin(2 * PI * (frame + i) * frequency / SAMPLE_RATE) * Short.MAX_VALUE * vol)
+                        val sample = (sin(2 * PI * (frame + i) * currentFreq / SAMPLE_RATE) * Short.MAX_VALUE * currentVol)
                             .toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
-                        chunk[i * 2]     = if (ear == "left"  || ear == "both") sample else 0
-                        chunk[i * 2 + 1] = if (ear == "right" || ear == "both") sample else 0
+                        chunk[i * 2]     = if (currentEar == "left"  || currentEar == "both") sample else 0
+                        chunk[i * 2 + 1] = if (currentEar == "right" || currentEar == "both") sample else 0
                     }
 
                     track.write(chunk, 0, chunk.size)
                     frame += chunkPairs
                 }
             } catch (e: Exception) { /* silenciar */ }
-        }.start()
+            finally {
+                try { testAudioTrack?.stop(); testAudioTrack?.release() } catch (e: Exception) {}
+                testAudioTrack = null
+                isTestingTone = false
+            }
+        }.also { testThread = it }.start()
     }
 
     @ReactMethod
@@ -302,8 +351,8 @@ class NativeAudioEngineModule(reactContext: ReactApplicationContext) : ReactCont
 
     private fun stopTestToneInternal() {
         isTestingTone = false
-        try { testAudioTrack?.stop(); testAudioTrack?.release() } catch (e: Exception) {}
-        testAudioTrack = null
+        try { testThread?.join(500) } catch (e: Exception) {}
+        testThread = null
     }
 
     // ─── Helpers ───────────────────────────────────────────────────────────────

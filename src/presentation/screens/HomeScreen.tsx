@@ -5,6 +5,8 @@ import {
   ScrollView,
   StatusBar,
   StyleSheet,
+  Text,
+  TouchableOpacity,
   useColorScheme,
   View,
 } from 'react-native';
@@ -388,6 +390,24 @@ export const HomeScreen: React.FC = () => {
             textColor={theme.text}
             cardBg={theme.cardBg}
           />
+          
+          <View style={{ marginTop: 24, alignItems: 'center' }}>
+            <TouchableOpacity 
+              style={{ paddingVertical: 12, paddingHorizontal: 24, backgroundColor: '#ef4444', borderRadius: 24, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}
+              onPress={async () => {
+                const emptyConfig = { left: new Array(11).fill(0), right: new Array(11).fill(0) };
+                const updatedProfiles = await captureAgent.saveFullProfile(activeSlot, emptyConfig);
+                setProfiles(updatedProfiles);
+                if (isEngineActive) {
+                  await audioEngine.applyFullConfig(updatedProfiles[activeSlot]);
+                }
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Restablecer perfil actual"
+            >
+              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>🧹 Restablecer perfil actual</Text>
+            </TouchableOpacity>
+          </View>
         </CollapsibleSection>
       </ScrollView>
       </View>

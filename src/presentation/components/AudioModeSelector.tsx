@@ -41,7 +41,7 @@ export const AudioModeSelector: React.FC<AudioModeSelectorProps> = ({
               Ambiente
             </Text>
             <Text style={[styles.pillSub, mode === 'ambient' ? styles.pillSubActive : { color: textColor, opacity: 0.55 }]}>
-              Micrófono en tiempo real
+              Micrófono en{'\n'}tiempo real
             </Text>
           </View>
         </TouchableOpacity>
@@ -50,22 +50,24 @@ export const AudioModeSelector: React.FC<AudioModeSelectorProps> = ({
         <TouchableOpacity
           style={[
             styles.pill,
-            mode === 'global'
-              ? styles.pillActiveGlobal
-              : styles.pillInactive,
+            styles.pillInactive,
+            { opacity: 0.5 }
           ]}
-          onPress={() => !disabled && onModeChange('global')}
+          onPress={() => {
+            // Disabled, show an alert or just do nothing
+          }}
           accessibilityRole="button"
-          accessibilityLabel="Modo Sistema Global"
-          accessibilityState={{ selected: mode === 'global' }}
+          accessibilityLabel="Modo Sistema Global - Próximamente"
+          accessibilityState={{ disabled: true }}
+          activeOpacity={0.8}
         >
           <Text style={styles.pillIcon}>📱</Text>
           <View>
-            <Text style={[styles.pillTitle, mode === 'global' ? styles.pillTitleActive : { color: textColor }]}>
+            <Text style={[styles.pillTitle, { color: textColor }]}>
               Sistema
             </Text>
-            <Text style={[styles.pillSub, mode === 'global' ? styles.pillSubActive : { color: textColor, opacity: 0.55 }]}>
-              EQ global del dispositivo
+            <Text style={[styles.pillSub, { color: textColor, opacity: 0.55 }]}>
+              EQ global del{'\n'}dispositivo
             </Text>
           </View>
         </TouchableOpacity>
@@ -77,11 +79,9 @@ export const AudioModeSelector: React.FC<AudioModeSelectorProps> = ({
           🟢 Conecta auriculares y coloca el teléfono cerca del oído para escuchar el audio del entorno ecualizado.
         </Text>
       )}
-      {mode === 'global' && (
-        <Text style={styles.hint}>
-          ⚠️ El EQ global puede no funcionar cuando otras apps (YouTube, Spotify) retienen el audio.
-        </Text>
-      )}
+      <Text style={styles.hint}>
+        ⚠️ Sistema: Esta característica se lanzará próximamente.
+      </Text>
     </View>
   );
 };

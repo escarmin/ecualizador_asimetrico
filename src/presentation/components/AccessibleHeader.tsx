@@ -66,9 +66,9 @@ export const AccessibleHeader: React.FC<AccessibleHeaderProps> = ({
               accessibilityLabel={isEngineActive ? 'Ecualizador activo. Presiona para apagar.' : 'Ecualizador apagado. Presiona para encender.'}
               accessibilityHint="Activa o desactiva el motor de procesamiento estéreo"
             >
-              {/* Icono ⏻ Power */}
+              {/* Texto simple ON/OFF en lugar de símbolos unicode problemáticos */}
               <Text style={[styles.powerIcon, { color: isEngineActive ? '#FFFFFF' : '#94a3b8' }]}>
-                ⏻
+                {isEngineActive ? 'ON' : 'OFF'}
               </Text>
             </TouchableOpacity>
 
@@ -172,9 +172,9 @@ const styles = StyleSheet.create({
     borderColor: '#475569',
   },
   powerIcon: {
-    fontSize: 26,
+    fontSize: 16,
     fontWeight: 'bold',
-    lineHeight: 30,
+    lineHeight: 20,
   },
   bellIconText: {
     fontSize: 24,
