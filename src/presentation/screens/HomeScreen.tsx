@@ -428,6 +428,9 @@ export const HomeScreen: React.FC = () => {
         cardBg={theme.cardBg}
         textColor={theme.text}
       />
+      <Text style={{ textAlign: 'center', fontSize: 10, color: '#64748b', paddingVertical: 6 }}>
+        by Carmin
+      </Text>
     </SafeAreaView>
   );
 };

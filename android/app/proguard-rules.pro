@@ -1,10 +1,31 @@
 # Add project specific ProGuard rules here.
-# By default, the flags in this file are appended to flags specified
-# in /usr/local/Cellar/android-sdk/24.3.3/tools/proguard/proguard-android.txt
-# You can edit the include path and order by changing the proguardFiles
-# directive in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
 
-# Add any project specific keep options here:
+# ─── React Native core (OBLIGATORIO para que no crashee) ───────────────────────
+-keep class com.facebook.react.** { *; }
+-keep class com.facebook.hermes.** { *; }
+-keep class com.facebook.jni.** { *; }
+
+# ─── Módulos nativos propios ────────────────────────────────────────────────────
+-keep class com.asymmetricequalizerapp.** { *; }
+
+# ─── MMKV ───────────────────────────────────────────────────────────────────────
+-keep class com.tencent.mmkv.** { *; }
+
+# ─── Keychain ────────────────────────────────────────────────────────────────────
+-keep class com.oblador.keychain.** { *; }
+
+# ─── Librería de criptografía (usada por keychain) ──────────────────────────────
+-keep class org.spongycastle.** { *; }
+-keep class org.bouncycastle.** { *; }
+
+# ─── Annotations / Reflection necesarias para React Native ──────────────────────
+-keepattributes *Annotation*
+-keepattributes SourceFile,LineNumberTable
+-keepattributes Signature
+-keepattributes Exceptions
+
+# ─── Evitar warnings de bibliotecas externas ────────────────────────────────────
+-dontwarn com.facebook.**
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-dontwarn javax.annotation.**
